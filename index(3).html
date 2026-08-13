@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Jungle Quest</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#82bd68;font-family:Arial,sans-serif;touch-action:none}
+body{position:fixed;inset:0}
+canvas{display:block;width:100vw;height:100vh}
+#info{position:fixed;top:10px;left:10px;z-index:5;color:#fff;font-size:18px;font-weight:bold;text-shadow:0 2px 4px #234;pointer-events:none}
+#controller{position:fixed;left:20px;bottom:18px;width:165px;height:165px;z-index:10}
+.move{position:absolute;width:58px;height:58px;border:2px solid #557d43;border-radius:50%;background:#eee;color:#315c2b;font-size:24px;font-weight:bold;touch-action:none;user-select:none}
+.move:active,#action:active{background:#b8dca8}
+.up{left:53px;top:0}.down{left:53px;bottom:0}.left{left:0;top:53px}.right{right:0;top:53px}
+#action{position:fixed;right:25px;bottom:28px;width:100px;height:100px;border:3px solid #557d43;border-radius:50%;background:#eee;color:#315c2b;font-size:17px;font-weight:bold;z-index:10;touch-action:none;user-select:none}
+#message{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;text-align:center;background:rgba(25,60,25,.94);color:#fff;font-size:30px}
+#message button{margin-top:15px;padding:12px 28px;border:0;border-radius:10px;font-size:18px}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="info">
+Level: <span id="level">1</span>
+&nbsp;|&nbsp;
+Gems: <span id="gems">0</span>/<span id="goal">5</span>
+&nbsp;|&nbsp;
+Score: <span id="score">0</span>
+</div>
+
+<div id="controller">
+<button class="move up" data-dx="0" data-dy="-1">▲</button>
+<button class="move left" data-dx="-1" data-dy="0">◀</button>
+<button class="move right" data-dx="1" data-dy="0">▶</button>
+<button class="move down" data-dx="0" data-dy="1">▼</button>
+</div>
+
+<button id="action">ACTION</button>
+
+<div id="message"><div id="messageText"></div></div>
+
+<script>
+"use strict";
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const levelEl=document.getElementById("level");
+const gemsEl=document.getElementById("gems");
+const goalEl=document.getElementById("goal");
+const scoreEl=document.getElementById("score");
+const message=document.getElementById("message");
+const messageText=document.getElementById("messageText");
+
+let W=0,H=0;
+let level=1,score=0,gems=0,goal=5,playing=true;
+let gemsList=[],animals=[],obstacles=[];
+let moveX=0,moveY=0,lastTime=0;
+
+const player={x:70,y:200,size:32,speed:330};
+
+const levels={
+    1:{goal:5,animals:2,animalSpeed:55},
+    2:{goal:8,animals:3,animalSpeed:75},
+    3:{goal:10,animals:4,animalSpeed:95}
+};
+
+function resize(){
+    const dpr=Math.min(window.devicePixelRatio||1,2);
+    W=window.innerWidth;
+    H=window.innerHeight;
+    canvas.width=Math.max(1,Math.floor(W*dpr));
+    canvas.height=Math.max(1,Math.floor(H*dpr));
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    player.x=Math.max(10,Math.min(player.x,W-42));
+    player.y=Math.max(45,Math.min(player.y,H-42));
+}
+
+function randomPosition(){
+    return{
+        x:100+Math.random()*Math.max(100,W-230),
+        y:70+Math.random()*Math.max(80,H-170)
+    };
+}
+
+function createLevel(){
+    goal=levels[level].goal;
+    gems=0;
+    gemsList=[];
+    animals=[];
+    obstacles=[];
+
+    for(let i=0;i<goal;i++){
+        const p=randomPosition();
+        gemsList.push({x:p.x,y:p.y,size:12});
+    }
+
+    for(let i=0;i<7+level;i++){
+        const p=randomPosition();
+        obstacles.push({x:p.x,y:p.y,width:40,height:40});
+    }
+
+    for(let i=0;i<levels[level].animals;i++){
+        const p=randomPosition();
+        animals.push({
+            x:p.x,y:p.y,size:34,
+            speed:levels[level].animalSpeed,
+            type:i%2===0?"snake":"monkey"
+        });
+    }
+
+    player.x=70;
+    player.y=H/2-16;
+    updateInfo();
+}
+
+function updateInfo(){
+    levelEl.textContent=level;
+    gemsEl.textContent=gems;
+    goalEl.textContent=goal;
+    scoreEl.textContent=score;
+}
+
+function drawBackground(){
+    ctx.fillStyle="#8fca72";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#6ead58";
+    for(let i=0;i<80;i++){
+        const x=(i*83)%W;
+        const y=(i*47)%H;
+        ctx.fillRect(x,y,5,12);
+    }
+
+    for(let i=0;i<12;i++){
+        const x=(i*173+50)%W;
+        const y=(i*91+30)%H;
+
+        ctx.fillStyle="#6b4328";
+        ctx.fillRect(x,y+25,18,45);
+
+        ctx.fillStyle="#24723a";
+        ctx.beginPath();
+        ctx.arc(x+9,y+20,28,0,Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle="#318d43";
+        ctx.beginPath();
+        ctx.arc(x-10,y+30,20,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function drawObstacles(){
+    for(const rock of obstacles){
+        ctx.fillStyle="#777";
+        ctx.beginPath();
+        ctx.arc(rock.x+20,rock.y+22,21,0,Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle="#999";
+        ctx.beginPath();
+        ctx.arc(rock.x+13,rock.y+14,6,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function drawGems(){
+    for(const gem of gemsList){
+        ctx.fillStyle="#16a085";
+        ctx.beginPath();
+        ctx.moveTo(gem.x,gem.y-gem.size);
+        ctx.lineTo(gem.x+gem.size,gem.y);
+        ctx.lineTo(gem.x,gem.y+gem.size);
+        ctx.lineTo(gem.x-gem.size,gem.y);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle="#aaf5df";
+        ctx.beginPath();
+        ctx.arc(gem.x-3,gem.y-3,3,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function drawExit(){
+    const x=W-80,y=H/2-35;
+
+    ctx.fillStyle="#7d4e27";
+    ctx.fillRect(x,y,45,70);
+
+    ctx.fillStyle="#f1c40f";
+    ctx.beginPath();
+    ctx.arc(x+34,y+36,4,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle="#fff";
+    ctx.font="14px Arial";
+    ctx.fillText("EXIT",x,y-8);
+}
+
+function drawPlayer(){
+    ctx.fillStyle="#315c2b";
+    ctx.fillRect(player.x+7,player.y+10,20,22);
+
+    ctx.fillStyle="#f0b27a";
+    ctx.beginPath();
+    ctx.arc(player.x+17,player.y+9,10,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle="#7d5a35";
+    ctx.fillRect(player.x+5,player.y-2,24,6);
+}
+
+function drawAnimal(animal){
+    if(animal.type==="snake"){
+        ctx.fillStyle="#2e7d32";
+        ctx.beginPath();
+        ctx.arc(animal.x,animal.y,animal.size/2,0,Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle="#111";
+        ctx.beginPath();
+        ctx.arc(animal.x-7,animal.y-5,3,0,Math.PI*2);
+        ctx.fill();
+    }else{
+        ctx.fillStyle="#704214";
+        ctx.beginPath();
+        ctx.arc(animal.x,animal.y,animal.size/2,0,Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle="#d6a66a";
+        ctx.beginPath();
+        ctx.arc(animal.x,animal.y+5,10,0,Math.PI*2);
+        ctx.fill();
+
+        ctx.fillStyle="#111";
+        ctx.beginPath();
+        ctx.arc(animal.x-6,animal.y-5,3,0,Math.PI*2);
+        ctx.fill();
+    }
+}
+
+function updatePlayer(dt){
+    if(!moveX&&!moveY)return;
+
+    const length=Math.hypot(moveX,moveY)||1;
+    const oldX=player.x;
+    const oldY=player.y;
+
+    player.x+=moveX/length*player.speed*dt;
+    player.y+=moveY/length*player.speed*dt;
+
+    player.x=Math.max(5,Math.min(W-player.size-5,player.x));
+    player.y=Math.max(45,Math.min(H-player.size-5,player.y));
+
+    if(hitsObstacle()){
+        player.x=oldX;
+        player.y=oldY;
+    }
+
+    collectGems();
+}
+
+function hitsObstacle(){
+    for(const rock of obstacles){
+        if(player.x<rock.x+rock.width &&
+           player.x+player.size>rock.x &&
+           player.y<rock.y+rock.height &&
+           player.y+player.size>rock.y){
+            return true;
+        }
+    }
+    return false;
+}
+
+function collectGems(){
+    for(let i=gemsList.length-1;i>=0;i--){
+        const gem=gemsList[i];
+        const dx=player.x+player.size/2-gem.x;
+        const dy=player.y+player.size/2-gem.y;
+
+        if(Math.hypot(dx,dy)<28){
+            gemsList.splice(i,1);
+            gems++;
+            score+=10;
+            updateInfo();
+        }
+    }
+}
+
+function updateAnimals(dt){
+    for(const animal of animals){
+        const dx=player.x-animal.x;
+        const dy=player.y-animal.y;
+        const distance=Math.hypot(dx,dy);
+
+        if(distance<280&&distance>1){
+            animal.x+=dx/distance*animal.speed*dt;
+            animal.y+=dy/distance*animal.speed*dt;
+        }
+
+        drawAnimal(animal);
+
+        if(animal.x<player.x+player.size &&
+           animal.x+animal.size>player.x &&
+           animal.y<player.y+player.size &&
+           animal.y+animal.size>player.y){
+            gameOver();
+            return;
+        }
+    }
+}
+
+function checkExit(){
+    if(gems<goal)return;
+
+    const exitX=W-80;
+    const exitY=H/2-35;
+
+    if(player.x<exitX+45 &&
+       player.x+player.size>exitX &&
+       player.y<exitY+70 &&
+       player.y+player.size>exitY){
+        nextLevel();
+    }
+}
+
+function action(){
+    if(!playing)return;
+    collectGems();
+    checkExit();
+}
+
+function nextLevel(){
+    level++;
+
+    if(level>3){
+        playing=false;
+        moveX=0;
+        moveY=0;
+        showMessage("JUNGLE ESCAPED!<br>Final Score: "+score+
+            "<br><button onclick='restart()'>PLAY AGAIN</button>");
+        return;
+    }
+
+    createLevel();
+}
+
+function gameOver(){
+    if(!playing)return;
+
+    playing=false;
+    moveX=0;
+    moveY=0;
+
+    showMessage("CAUGHT BY AN ANIMAL!<br>Score: "+score+
+        "<br><button onclick='restart()'>TRY AGAIN</button>");
+}
+
+function showMessage(text){
+    messageText.innerHTML=text;
+    message.style.display="flex";
+}
+
+function restart(){
+    level=1;
+    score=0;
+    playing=true;
+    message.style.display="none";
+    createLevel();
+}
+
+/* Touch controls */
+document.querySelectorAll(".move").forEach(button=>{
+    const dx=Number(button.dataset.dx);
+    const dy=Number(button.dataset.dy);
+
+    button.addEventListener("pointerdown",event=>{
+        event.preventDefault();
+        moveX=dx;
+        moveY=dy;
+        if(button.setPointerCapture)button.setPointerCapture(event.pointerId);
+    });
+
+    button.addEventListener("pointerup",event=>{
+        event.preventDefault();
+        if(moveX===dx&&moveY===dy){
+            moveX=0;
+            moveY=0;
+        }
+    });
+
+    button.addEventListener("pointercancel",()=>{
+        moveX=0;
+        moveY=0;
+    });
+});
+
+/* Action */
+document.getElementById("action").addEventListener("pointerdown",event=>{
+    event.preventDefault();
+    action();
+});
+
+/* Keyboard */
+const keys={};
+
+document.addEventListener("keydown",event=>{
+    keys[event.key]=true;
+    setKeyboardMove();
+});
+
+document.addEventListener("keyup",event=>{
+    keys[event.key]=false;
+    setKeyboardMove();
+});
+
+function setKeyboardMove(){
+    let x=0,y=0;
+    if(keys.ArrowLeft||keys.a)x--;
+    if(keys.ArrowRight||keys.d)x++;
+    if(keys.ArrowUp||keys.w)y--;
+    if(keys.ArrowDown||keys.s)y++;
+    moveX=x;
+    moveY=y;
+}
+
+/* Landscape */
+async function requestLandscape(){
+    try{
+        if(screen.orientation&&screen.orientation.lock){
+            await screen.orientation.lock("landscape");
+        }
+    }catch(error){}
+}
+
+window.addEventListener("resize",resize);
+window.addEventListener("orientationchange",()=>setTimeout(resize,100));
+document.addEventListener("pointerdown",requestLandscape,{once:true});
+
+/* Start */
+resize();
+createLevel();
+updateInfo();
+
+requestAnimationFrame(function loop(time){
+    const dt=Math.min((time-lastTime)/1000,0.033)||0;
+    lastTime=time;
+
+    drawBackground();
+    drawObstacles();
+    drawGems();
+    drawExit();
+
+    if(playing){
+        updatePlayer(dt);
+        updateAnimals(dt);
+        checkExit();
+    }
+
+    drawPlayer();
+
+    requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
